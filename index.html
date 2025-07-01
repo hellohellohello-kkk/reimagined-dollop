@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>リンク機構 可動範囲可視化ツール (3関節)</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: row; padding: 20px; }
+        #canvas-container { position: relative; }
+        canvas { border: 1px solid #333; position: absolute; top: 0; left: 0; }
+        #mainCanvas { z-index: 10; }
+        #workspaceCanvas { z-index: 1; }
+        #controls { margin-left: 550px; display: flex; flex-direction: column; }
+        .control-group { margin-bottom: 12px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="range"] { width: 250px; }
+        input[type="number"] { width: 60px; margin: 0 5px; }
+        span { font-weight: normal; margin-left: 10px; }
+        button { padding: 10px 15px; font-size: 16px; cursor: pointer; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <canvas id="workspaceCanvas" width="500" height="500"></canvas>
+        <canvas id="mainCanvas" width="500" height="500"></canvas>
+    </div>
+
+    <div id="controls">
+        <h2>パラメータ設定</h2>
+        <div class="control-group">
+            <label>アーム1 長さ: <span id="l1_val">100</span></label>
+            <input type="range" id="l1" class="length-slider" min="10" max="500" value="100">
+        </div>
+        <div class="control-group">
+            <label>アーム2 長さ: <span id="l2_val">80</span></label>
+            <input type="range" id="l2" class="length-slider" min="10" max="500" value="80">
+        </div>
+        <div class="control-group">
+            <label>アーム3 長さ: <span id="l3_val">60</span></label>
+            <input type="range" id="l3" class="length-slider" min="10" max="500" value="60">
+        </div>
+        <div class="control-group">
+            <label>関節1 角度: <span id="a1_val">45</span>°</label>
+            <input type="range" id="a1" class="angle-slider" min="0" max="360" value="45">
+            範囲: <input type="number" id="a1_min" class="angle-limit" value="0"> ~ <input type="number" id="a1_max" class="angle-limit" value="360"> °
+        </div>
+        <div class="control-group">
+            <label>関節2 角度: <span id="a2_val">30</span>°</label>
+            <input type="range" id="a2" class="angle-slider" min="-180" max="180" value="30">
+            範囲: <input type="number" id="a2_min" class="angle-limit" value="-90"> ~ <input type="number" id="a2_max" class="angle-limit" value="90"> °
+        </div>
+        <div class="control-group">
+            <label>関節3 角度: <span id="a3_val">20</span>°</label>
+            <input type="range" id="a3" class="angle-slider" min="-180" max="180" value="20">
+            範囲: <input type="number" id="a3_min" class="angle-limit" value="-90"> ~ <input type="number" id="a3_max" class="angle-limit" value="90"> °
+        </div>
+        <div class="control-group">
+            <label for="angleSumConstraint">角度合計値の拘束</label>
+            <input type="checkbox" id="enableAngleSumConstraint">
+            <label for="enableAngleSumConstraint" style="display: inline-block; font-weight: normal;">有効にする</label>
+            <br>
+            A1+A2+A3 = <input type="number" id="angleSumValue" value="90"> °
+        </div>
+        <button id="updateWorkspaceBtn">可動範囲を再計算</button>
+        <div class="control-group">
+            <label for="animateCheckbox">包絡線アニメーション</label>
+            <input type="checkbox" id="animateCheckbox">
+            <label for="animateCheckbox" style="display: inline-block; font-weight: normal;">実行する</label>
+        </div>
+    </div>
+
+    <script>
+        const mainCanvas = document.getElementById('mainCanvas');
+        const mainCtx = mainCanvas.getContext('2d');
+        const workspaceCanvas = document.getElementById('workspaceCanvas');
+        const workspaceCtx = workspaceCanvas.getContext('2d');
+        const centerX = mainCanvas.width / 2, centerY = mainCanvas.height / 2;
+        let scale = 1.0;
+
+        // --- Animation variables ---
+        let animationFrameId = null;
+        let hullForAnimation = [];
+        let animationStartTime = null;
+        const ANIMATION_SPEED = 150; // ワールド座標系での速度 (ユニット/秒)
+        let hullSegmentLengths = [];
+        let hullTotalLength = 0;
+
+        const controls = {
+            l1: document.getElementById('l1'), l2: document.getElementById('l2'), l3: document.getElementById('l3'),
+            a1: document.getElementById('a1'), a2: document.getElementById('a2'), a3: document.getElementById('a3'),
+            a1_min: document.getElementById('a1_min'), a1_max: document.getElementById('a1_max'),
+            a2_min: document.getElementById('a2_min'), a2_max: document.getElementById('a2_max'),
+            a3_min: document.getElementById('a3_min'), a3_max: document.getElementById('a3_max'),
+            l1_val: document.getElementById('l1_val'), l2_val: document.getElementById('l2_val'), l3_val: document.getElementById('l3_val'),
+            a1_val: document.getElementById('a1_val'), a2_val: document.getElementById('a2_val'), a3_val: document.getElementById('a3_val'),
+            updateBtn: document.getElementById('updateWorkspaceBtn'),
+            enableAngleSumConstraint: document.getElementById('enableAngleSumConstraint'),
+            angleSumValue: document.getElementById('angleSumValue'),
+            animateCheckbox: document.getElementById('animateCheckbox')
+        };
+
+        const toRad = (deg) => deg * Math.PI / 180;
+        const worldToCanvas = (p) => ({ x: centerX + p.x * scale, y: centerY - p.y * scale });
+
+        function drawArm() {
+            mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+            const l1 = +controls.l1.value, l2 = +controls.l2.value, l3 = +controls.l3.value;
+            const a1_rad = toRad(+controls.a1.value), a2_rad = toRad(+controls.a2.value), a3_rad = toRad(+controls.a3.value);
+
+            const j1_world = { x: 0, y: 0 };
+            const j2_world = { x: l1 * Math.cos(a1_rad), y: l1 * Math.sin(a1_rad) };
+            const j3_world = { x: j2_world.x + l2 * Math.cos(a1_rad + a2_rad), y: j2_world.y + l2 * Math.sin(a1_rad + a2_rad) };
+            const tip_world = { x: j3_world.x + l3 * Math.cos(a1_rad + a2_rad + a3_rad), y: j3_world.y + l3 * Math.sin(a1_rad + a2_rad + a3_rad) };
+
+            const j1_canvas = worldToCanvas(j1_world), j2_canvas = worldToCanvas(j2_world), j3_canvas = worldToCanvas(j3_world), tip_canvas = worldToCanvas(tip_world);
+
+            mainCtx.lineWidth = 6;
+            mainCtx.strokeStyle = '#555'; mainCtx.beginPath(); mainCtx.moveTo(j1_canvas.x, j1_canvas.y); mainCtx.lineTo(j2_canvas.x, j2_canvas.y); mainCtx.stroke();
+            mainCtx.strokeStyle = '#777'; mainCtx.beginPath(); mainCtx.moveTo(j2_canvas.x, j2_canvas.y); mainCtx.lineTo(j3_canvas.x, j3_canvas.y); mainCtx.stroke();
+            mainCtx.strokeStyle = '#999'; mainCtx.beginPath(); mainCtx.moveTo(j3_canvas.x, j3_canvas.y); mainCtx.lineTo(tip_canvas.x, tip_canvas.y); mainCtx.stroke();
+
+            mainCtx.fillStyle = 'red'; mainCtx.beginPath(); mainCtx.arc(j1_canvas.x, j1_canvas.y, 8, 0, 2 * Math.PI); mainCtx.fill();
+            mainCtx.fillStyle = 'blue'; mainCtx.beginPath(); mainCtx.arc(j2_canvas.x, j2_canvas.y, 7, 0, 2 * Math.PI); mainCtx.fill();
+            mainCtx.fillStyle = 'green'; mainCtx.beginPath(); mainCtx.arc(j3_canvas.x, j3_canvas.y, 6, 0, 2 * Math.PI); mainCtx.fill();
+
+            const drawCoordinate = (canvas_p, world_p, name) => {
+                mainCtx.fillStyle = '#000'; mainCtx.font = '12px Arial'; mainCtx.textAlign = 'center'; mainCtx.textBaseline = 'bottom';
+                const text = `${name}: (${world_p.x.toFixed(1)}, ${world_p.y.toFixed(1)})`;
+                mainCtx.fillText(text, canvas_p.x, canvas_p.y - 10);
+            };
+            drawCoordinate(j1_canvas, j1_world, 'J1'); drawCoordinate(j2_canvas, j2_world, 'J2');
+            drawCoordinate(j3_canvas, j3_world, 'J3'); drawCoordinate(tip_canvas, tip_world, 'Tip');
+        }
+
+        function getConvexHull(points) {
+            if (points.length <= 3) return points;
+            const uniquePoints = Array.from(new Map(points.map(p => [`${p.x.toFixed(3)},${p.y.toFixed(3)}`, p])).values());
+            uniquePoints.sort((a, b) => a.x - b.x || a.y - b.y);
+            const cross_product = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+            const lower = [];
+            for (const p of uniquePoints) {
+                while (lower.length >= 2 && cross_product(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) { lower.pop(); }
+                lower.push(p);
+            }
+            const upper = [];
+            for (let i = uniquePoints.length - 1; i >= 0; i--) {
+                const p = uniquePoints[i];
+                while (upper.length >= 2 && cross_product(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) { upper.pop(); }
+                upper.push(p);
+            }
+            upper.pop(); lower.pop();
+            return lower.concat(upper);
+        }
+
+        function drawGrid() {
+            workspaceCtx.clearRect(0, 0, workspaceCanvas.width, workspaceCanvas.height);
+            const gridSize = 100;
+            const gridPixelSize = gridSize * scale;
+            workspaceCtx.beginPath(); workspaceCtx.strokeStyle = '#e0e0e0'; workspaceCtx.lineWidth = 1;
+            for (let x = centerX; x <= workspaceCanvas.width; x += gridPixelSize) { workspaceCtx.moveTo(x, 0); workspaceCtx.lineTo(x, workspaceCanvas.height); }
+            for (let x = centerX; x >= 0; x -= gridPixelSize) { workspaceCtx.moveTo(x, 0); workspaceCtx.lineTo(x, workspaceCanvas.height); }
+            for (let y = centerY; y <= workspaceCanvas.height; y += gridPixelSize) { workspaceCtx.moveTo(0, y); workspaceCtx.lineTo(workspaceCanvas.width, y); }
+            for (let y = centerY; y >= 0; y -= gridPixelSize) { workspaceCtx.moveTo(0, y); workspaceCtx.lineTo(workspaceCanvas.width, y); }
+            workspaceCtx.stroke();
+            workspaceCtx.beginPath(); workspaceCtx.strokeStyle = '#888';
+            workspaceCtx.moveTo(0, centerY); workspaceCtx.lineTo(workspaceCanvas.width, centerY);
+            workspaceCtx.moveTo(centerX, 0); workspaceCtx.lineTo(centerX, workspaceCanvas.height);
+            workspaceCtx.stroke();
+            workspaceCtx.fillStyle = '#666'; workspaceCtx.font = '10px Arial'; workspaceCtx.textAlign = 'center'; workspaceCtx.textBaseline = 'top';
+            for (let i = 1; (centerX + i * gridPixelSize) < workspaceCanvas.width; i++) {
+                workspaceCtx.fillText((i * gridSize).toString(), centerX + i * gridPixelSize, centerY + 5);
+                workspaceCtx.fillText((-i * gridSize).toString(), centerX - i * gridPixelSize, centerY + 5);
+            }
+            workspaceCtx.textAlign = 'right'; workspaceCtx.textBaseline = 'middle';
+            for (let i = 1; (centerY + i * gridPixelSize) < workspaceCanvas.height; i++) {
+                workspaceCtx.fillText((i * gridSize).toString(), centerX - 5, centerY - i * gridPixelSize);
+                workspaceCtx.fillText((-i * gridSize).toString(), centerX - 5, centerY + i * gridPixelSize);
+            }
+        }
+
+        function calculateAndDrawWorkspace() {
+            stopAnimation();
+            workspaceCtx.clearRect(0, 0, workspaceCanvas.width, workspaceCanvas.height);
+            drawGrid();
+
+            const l1 = +controls.l1.value, l2 = +controls.l2.value, l3 = +controls.l3.value;
+            const a1_min = +controls.a1_min.value, a1_max = +controls.a1_max.value;
+            const a2_min = +controls.a2_min.value, a2_max = +controls.a2_max.value;
+            const a3_min = +controls.a3_min.value, a3_max = +controls.a3_max.value;
+            const REACHABLE_AREA_STEP = 5; // 可動範囲描画用の点のステップ
+            const ANIMATION_HULL_STEP = 15; // アニメーション用凸包計算用の点のステップ
+
+            const getTipPositionWithAngles = (d1, d2, d3) => {
+                const a1 = toRad(d1), a2 = toRad(d2), a3 = toRad(d3);
+                const j2 = { x: l1 * Math.cos(a1), y: l1 * Math.sin(a1) };
+                const j3 = { x: j2.x + l2 * Math.cos(a1 + a2), y: j2.y + l2 * Math.sin(a1 + a2) };
+                const tip = { x: j3.x + l3 * Math.cos(a1 + a2 + a3), y: j3.y + l3 * Math.sin(a1 + a2 + a3) };
+                return { ...tip, a1: d1, a2: d2, a3: d3 };
+            };
+
+            // アニメーションパス用の凸包を計算し、その境界線を描画する関数
+            const getConvexHullPointsAndDraw = (points, fill, stroke) => {
+                if (points.length === 0) return [];
+                const hullPoints = getConvexHull(points);
+                const canvasHull = hullPoints.map(p => worldToCanvas(p));
+                if (canvasHull.length > 1) {
+                    workspaceCtx.beginPath();
+                    workspaceCtx.moveTo(canvasHull[0].x, canvasHull[0].y);
+                    for (let i = 1; i < canvasHull.length; i++) { workspaceCtx.lineTo(canvasHull[i].x, canvasHull[i].y); }
+                    workspaceCtx.closePath();
+                    workspaceCtx.fillStyle = fill; workspaceCtx.strokeStyle = stroke; workspaceCtx.lineWidth = 2;
+                    workspaceCtx.fill(); workspaceCtx.stroke();
+                }
+                return hullPoints;
+            };
+
+            const unconstrained_points = [];
+            for (let d1 = a1_min; d1 <= a1_max; d1 += ANIMATION_HULL_STEP) {
+                for (let d2 = a2_min; d2 <= a2_max; d2 += ANIMATION_HULL_STEP) {
+                    for (let d3 = a3_min; d3 <= a3_max; d3 += ANIMATION_HULL_STEP) {
+                        unconstrained_points.push(getTipPositionWithAngles(d1, d2, d3));
+                    }
+                }
+            }
+            // 可動範囲の領域を凸包で描画
+            const unconstrainedHull = getConvexHullPointsAndDraw(unconstrained_points, "rgba(0, 150, 255, 0.2)", "rgba(0, 100, 200, 0.5)");
+
+            let constrainedHull = [];
+            if (controls.enableAngleSumConstraint.checked) {
+                const constrained_points = [];
+                const angleSum = +controls.angleSumValue.value;
+                for (let d1 = a1_min; d1 <= a1_max; d1 += ANIMATION_HULL_STEP) {
+                    for (let d2 = a2_min; d2 <= a2_max; d2 += ANIMATION_HULL_STEP) {
+                        const d3 = angleSum - d1 - d2;
+                        if (d3 >= a3_min && d3 <= a3_max) {
+                            constrained_points.push(getTipPositionWithAngles(d1, d2, d3));
+                        }
+                    }
+                }
+                // 拘束された可動範囲の領域を凸包で描画
+                constrainedHull = getConvexHullPointsAndDraw(constrained_points, "rgba(255, 220, 0, 0.4)", "rgba(200, 160, 0, 1)");
+            }
+            
+            hullForAnimation = controls.enableAngleSumConstraint.checked && constrainedHull.length > 0 ? constrainedHull : unconstrainedHull;
+            
+            hullSegmentLengths = [];
+            hullTotalLength = 0;
+            if (hullForAnimation.length > 1) {
+                for (let i = 0; i < hullForAnimation.length; i++) {
+                    const p1 = hullForAnimation[i];
+                    const p2 = hullForAnimation[(i + 1) % hullForAnimation.length];
+                    const dist = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+                    hullSegmentLengths.push(dist);
+                    hullTotalLength += dist;
+                }
+            }
+
+            if (controls.animateCheckbox.checked) {
+                startAnimation();
+            }
+        }
+
+        function startAnimation() {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            if (hullForAnimation.length < 2) return;
+            animationStartTime = null;
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        function stopAnimation() {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+
+        function shortestAngleDist(from, to) {
+            const diff = (to - from + 180) % 360 - 180;
+            return diff < -180 ? diff + 360 : diff;
+        }
+
+        function animate(timestamp) {
+            if (hullForAnimation.length < 2 || hullTotalLength === 0) return;
+
+            if (!animationStartTime) {
+                animationStartTime = timestamp;
+            }
+
+            const elapsedTime = (timestamp - animationStartTime) / 1000; // seconds
+            const distanceCovered = (elapsedTime * ANIMATION_SPEED) % hullTotalLength;
+
+            let distanceAccumulator = 0;
+            let currentSegmentIndex = 0;
+            for (let i = 0; i < hullSegmentLengths.length; i++) {
+                if (distanceAccumulator + hullSegmentLengths[i] >= distanceCovered) {
+                    currentSegmentIndex = i;
+                    break;
+                }
+                distanceAccumulator += hullSegmentLengths[i];
+            }
+
+            const distanceIntoSegment = distanceCovered - distanceAccumulator;
+            const segmentLength = hullSegmentLengths[currentSegmentIndex];
+            const progress = segmentLength === 0 ? 0 : distanceIntoSegment / segmentLength;
+
+            const startPose = hullForAnimation[currentSegmentIndex];
+            const endPose = hullForAnimation[(currentSegmentIndex + 1) % hullForAnimation.length];
+
+            const a1_diff = shortestAngleDist(startPose.a1, endPose.a1);
+            const a2_diff = shortestAngleDist(startPose.a2, endPose.a2);
+            const a3_diff = shortestAngleDist(startPose.a3, endPose.a3);
+
+            controls.a1.value = startPose.a1 + a1_diff * progress;
+            controls.a2.value = startPose.a2 + a2_diff * progress;
+            controls.a3.value = startPose.a3 + a3_diff * progress;
+
+            controls.a1_val.textContent = (+controls.a1.value).toFixed(0);
+            controls.a2_val.textContent = (+controls.a2.value).toFixed(0);
+            controls.a3_val.textContent = (+controls.a3.value).toFixed(0);
+
+            drawArm();
+
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        function updateAngleSliderRange(jointNum) {
+            const slider = controls[`a${jointNum}`];
+            const minInput = controls[`a${jointNum}_min`];
+            const maxInput = controls[`a${jointNum}_max`];
+            let min = parseInt(minInput.value, 10), max = parseInt(maxInput.value, 10);
+            if (isNaN(min) || isNaN(max)) return;
+            if (min > max) { [min, max] = [max, min]; minInput.value = min; maxInput.value = max; }
+            slider.min = min; slider.max = max;
+            if (+slider.value < min) slider.value = min;
+            if (+slider.value > max) slider.value = max;
+            slider.dispatchEvent(new Event('input'));
+        }
+        
+        function updateView() {
+            const l1 = +controls.l1.value, l2 = +controls.l2.value, l3 = +controls.l3.value;
+            const maxReach = l1 + l2 + l3;
+            const viewRange = maxReach > 0 ? maxReach * 1.1 : 250;
+            scale = (mainCanvas.width / 2) / viewRange;
+            drawGrid();
+            drawArm();
+        }
+
+        function setupEventListeners() {
+            ['l1', 'l2', 'l3'].forEach(id => {
+                controls[id].addEventListener('input', () => {
+                    controls[`${id}_val`].textContent = controls[id].value;
+                    updateView();
+                });
+            });
+            ['a1', 'a2', 'a3'].forEach(id => {
+                controls[id].addEventListener('input', () => {
+                    if (!animationFrameId) {
+                        controls[`${id}_val`].textContent = controls[id].value;
+                        drawArm();
+                    }
+                });
+            });
+
+            ['1', '2', '3'].forEach(jointNum => {
+                controls[`a${jointNum}_min`].addEventListener('change', () => updateAngleSliderRange(jointNum));
+                controls[`a${jointNum}_max`].addEventListener('change', () => updateAngleSliderRange(jointNum));
+            });
+
+            controls.updateBtn.addEventListener('click', () => {
+                alert('可動範囲の計算を開始します。範囲が広いと時間がかかる場合があります。');
+                setTimeout(() => {
+                    calculateAndDrawWorkspace();
+                    alert('計算が完了しました。');
+                }, 10);
+            });
+
+            controls.animateCheckbox.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    startAnimation();
+                } else {
+                    stopAnimation();
+                }
+            });
+        }
+
+        function init() {
+            ['l1', 'l2', 'l3', 'a1', 'a2', 'a3'].forEach(id => {
+                controls[`${id}_val`].textContent = controls[id].value;
+            });
+            ['1', '2', '3'].forEach(updateAngleSliderRange);
+            
+            setupEventListeners();
+            updateView();
+            alert('各パラメータを設定し、「可動範囲を再計算」ボタンを押してください。');
+        }
+
+        init();
+    </script>
+</body>
+</html>
