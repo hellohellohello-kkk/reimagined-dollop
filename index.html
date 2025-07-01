@@ -78,11 +78,9 @@
 
         // --- Animation variables ---
         let animationFrameId = null;
-        let hullForAnimation = [];
-        let animationStartTime = null;
-        const ANIMATION_SPEED = 150; // ワールド座標系での速度 (ユニット/秒)
-        let hullSegmentLengths = [];
-        let hullTotalLength = 0;
+        let animationTarget = null; // {x, y, a1, a2, a3}
+        let animationPoints = [];   // List of reachable points for animation
+        const ANIMATION_ANGLE_SPEED = 1.5; // degrees per frame
 
         const controls = {
             l1: document.getElementById('l1'), l2: document.getElementById('l2'), l3: document.getElementById('l3'),
@@ -131,26 +129,6 @@
             drawCoordinate(j3_canvas, j3_world, 'J3'); drawCoordinate(tip_canvas, tip_world, 'Tip');
         }
 
-        function getConvexHull(points) {
-            if (points.length <= 3) return points;
-            const uniquePoints = Array.from(new Map(points.map(p => [`${p.x.toFixed(3)},${p.y.toFixed(3)}`, p])).values());
-            uniquePoints.sort((a, b) => a.x - b.x || a.y - b.y);
-            const cross_product = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-            const lower = [];
-            for (const p of uniquePoints) {
-                while (lower.length >= 2 && cross_product(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) { lower.pop(); }
-                lower.push(p);
-            }
-            const upper = [];
-            for (let i = uniquePoints.length - 1; i >= 0; i--) {
-                const p = uniquePoints[i];
-                while (upper.length >= 2 && cross_product(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) { upper.pop(); }
-                upper.push(p);
-            }
-            upper.pop(); lower.pop();
-            return lower.concat(upper);
-        }
-
         function drawGrid() {
             workspaceCtx.clearRect(0, 0, workspaceCanvas.width, workspaceCanvas.height);
             const gridSize = 100;
@@ -186,8 +164,7 @@
             const a1_min = +controls.a1_min.value, a1_max = +controls.a1_max.value;
             const a2_min = +controls.a2_min.value, a2_max = +controls.a2_max.value;
             const a3_min = +controls.a3_min.value, a3_max = +controls.a3_max.value;
-            const REACHABLE_AREA_STEP = 5; // 可動範囲描画用の点のステップ
-            const ANIMATION_HULL_STEP = 15; // アニメーション用凸包計算用の点のステップ
+            const REACHABLE_AREA_STEP = 8;
 
             const getTipPositionWithAngles = (d1, d2, d3) => {
                 const a1 = toRad(d1), a2 = toRad(d2), a3 = toRad(d3);
@@ -197,61 +174,40 @@
                 return { ...tip, a1: d1, a2: d2, a3: d3 };
             };
 
-            // アニメーションパス用の凸包を計算し、その境界線を描画する関数
-            const getConvexHullPointsAndDraw = (points, fill, stroke) => {
-                if (points.length === 0) return [];
-                const hullPoints = getConvexHull(points);
-                const canvasHull = hullPoints.map(p => worldToCanvas(p));
-                if (canvasHull.length > 1) {
-                    workspaceCtx.beginPath();
-                    workspaceCtx.moveTo(canvasHull[0].x, canvasHull[0].y);
-                    for (let i = 1; i < canvasHull.length; i++) { workspaceCtx.lineTo(canvasHull[i].x, canvasHull[i].y); }
-                    workspaceCtx.closePath();
-                    workspaceCtx.fillStyle = fill; workspaceCtx.strokeStyle = stroke; workspaceCtx.lineWidth = 2;
-                    workspaceCtx.fill(); workspaceCtx.stroke();
+            const drawReachableArea = (points, color, pixelSize = 2) => {
+                if (points.length === 0) return;
+                workspaceCtx.fillStyle = color;
+                for (const p of points) {
+                    const canvasP = worldToCanvas(p);
+                    workspaceCtx.fillRect(canvasP.x - pixelSize / 2, canvasP.y - pixelSize / 2, pixelSize, pixelSize);
                 }
-                return hullPoints;
             };
 
-            const unconstrained_points = [];
-            for (let d1 = a1_min; d1 <= a1_max; d1 += ANIMATION_HULL_STEP) {
-                for (let d2 = a2_min; d2 <= a2_max; d2 += ANIMATION_HULL_STEP) {
-                    for (let d3 = a3_min; d3 <= a3_max; d3 += ANIMATION_HULL_STEP) {
-                        unconstrained_points.push(getTipPositionWithAngles(d1, d2, d3));
+            const unconstrainedPoints = [];
+            for (let d1 = a1_min; d1 <= a1_max; d1 += REACHABLE_AREA_STEP) {
+                for (let d2 = a2_min; d2 <= a2_max; d2 += REACHABLE_AREA_STEP) {
+                    for (let d3 = a3_min; d3 <= a3_max; d3 += REACHABLE_AREA_STEP) {
+                        unconstrainedPoints.push(getTipPositionWithAngles(d1, d2, d3));
                     }
                 }
             }
-            // 可動範囲の領域を凸包で描画
-            const unconstrainedHull = getConvexHullPointsAndDraw(unconstrained_points, "rgba(0, 150, 255, 0.2)", "rgba(0, 100, 200, 0.5)");
+            drawReachableArea(unconstrainedPoints, "rgba(0, 150, 255, 0.4)", 2);
 
-            let constrainedHull = [];
+            let constrainedPoints = [];
             if (controls.enableAngleSumConstraint.checked) {
-                const constrained_points = [];
                 const angleSum = +controls.angleSumValue.value;
-                for (let d1 = a1_min; d1 <= a1_max; d1 += ANIMATION_HULL_STEP) {
-                    for (let d2 = a2_min; d2 <= a2_max; d2 += ANIMATION_HULL_STEP) {
+                for (let d1 = a1_min; d1 <= a1_max; d1 += REACHABLE_AREA_STEP) {
+                    for (let d2 = a2_min; d2 <= a2_max; d2 += REACHABLE_AREA_STEP) {
                         const d3 = angleSum - d1 - d2;
                         if (d3 >= a3_min && d3 <= a3_max) {
-                            constrained_points.push(getTipPositionWithAngles(d1, d2, d3));
+                            constrainedPoints.push(getTipPositionWithAngles(d1, d2, d3));
                         }
                     }
                 }
-                // 拘束された可動範囲の領域を凸包で描画
-                constrainedHull = getConvexHullPointsAndDraw(constrained_points, "rgba(255, 220, 0, 0.4)", "rgba(200, 160, 0, 1)");
-            }
-            
-            hullForAnimation = controls.enableAngleSumConstraint.checked && constrainedHull.length > 0 ? constrainedHull : unconstrainedHull;
-            
-            hullSegmentLengths = [];
-            hullTotalLength = 0;
-            if (hullForAnimation.length > 1) {
-                for (let i = 0; i < hullForAnimation.length; i++) {
-                    const p1 = hullForAnimation[i];
-                    const p2 = hullForAnimation[(i + 1) % hullForAnimation.length];
-                    const dist = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
-                    hullSegmentLengths.push(dist);
-                    hullTotalLength += dist;
-                }
+                drawReachableArea(constrainedPoints, "rgba(255, 0, 0, 0.7)", 3);
+                animationPoints = constrainedPoints;
+            } else {
+                animationPoints = unconstrainedPoints;
             }
 
             if (controls.animateCheckbox.checked) {
@@ -261,14 +217,22 @@
 
         function startAnimation() {
             if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            if (hullForAnimation.length < 2) return;
-            animationStartTime = null;
+            if (animationPoints.length < 2) return;
+            setNewAnimationTarget();
             animationFrameId = requestAnimationFrame(animate);
         }
 
         function stopAnimation() {
             if (animationFrameId) cancelAnimationFrame(animationFrameId);
             animationFrameId = null;
+            animationTarget = null;
+        }
+
+        function setNewAnimationTarget() {
+            if (animationPoints.length > 0) {
+                const randomIndex = Math.floor(Math.random() * animationPoints.length);
+                animationTarget = animationPoints[randomIndex];
+            }
         }
 
         function shortestAngleDist(from, to) {
@@ -276,47 +240,51 @@
             return diff < -180 ? diff + 360 : diff;
         }
 
-        function animate(timestamp) {
-            if (hullForAnimation.length < 2 || hullTotalLength === 0) return;
-
-            if (!animationStartTime) {
-                animationStartTime = timestamp;
-            }
-
-            const elapsedTime = (timestamp - animationStartTime) / 1000; // seconds
-            const distanceCovered = (elapsedTime * ANIMATION_SPEED) % hullTotalLength;
-
-            let distanceAccumulator = 0;
-            let currentSegmentIndex = 0;
-            for (let i = 0; i < hullSegmentLengths.length; i++) {
-                if (distanceAccumulator + hullSegmentLengths[i] >= distanceCovered) {
-                    currentSegmentIndex = i;
-                    break;
+        function animate() {
+            if (!animationTarget) {
+                setNewAnimationTarget();
+                if (!animationTarget) {
+                    animationFrameId = requestAnimationFrame(animate);
+                    return;
                 }
-                distanceAccumulator += hullSegmentLengths[i];
             }
 
-            const distanceIntoSegment = distanceCovered - distanceAccumulator;
-            const segmentLength = hullSegmentLengths[currentSegmentIndex];
-            const progress = segmentLength === 0 ? 0 : distanceIntoSegment / segmentLength;
+            const current_a1 = +controls.a1.value;
+            const current_a2 = +controls.a2.value;
+            const current_a3 = +controls.a3.value;
 
-            const startPose = hullForAnimation[currentSegmentIndex];
-            const endPose = hullForAnimation[(currentSegmentIndex + 1) % hullForAnimation.length];
+            const dist_a1 = shortestAngleDist(current_a1, animationTarget.a1);
+            const dist_a2 = shortestAngleDist(current_a2, animationTarget.a2);
+            const dist_a3 = shortestAngleDist(current_a3, animationTarget.a3);
 
-            const a1_diff = shortestAngleDist(startPose.a1, endPose.a1);
-            const a2_diff = shortestAngleDist(startPose.a2, endPose.a2);
-            const a3_diff = shortestAngleDist(startPose.a3, endPose.a3);
+            if (Math.abs(dist_a1) < 1 && Math.abs(dist_a2) < 1 && Math.abs(dist_a3) < 1) {
+                setNewAnimationTarget();
+                animationFrameId = requestAnimationFrame(animate);
+                return;
+            }
 
-            controls.a1.value = startPose.a1 + a1_diff * progress;
-            controls.a2.value = startPose.a2 + a2_diff * progress;
-            controls.a3.value = startPose.a3 + a3_diff * progress;
+            let next_a1 = current_a1 + Math.sign(dist_a1) * Math.min(ANIMATION_ANGLE_SPEED, Math.abs(dist_a1));
+            let next_a2 = current_a2 + Math.sign(dist_a2) * Math.min(ANIMATION_ANGLE_SPEED, Math.abs(dist_a2));
+            let next_a3 = current_a3 + Math.sign(dist_a3) * Math.min(ANIMATION_ANGLE_SPEED, Math.abs(dist_a3));
+
+            if (controls.enableAngleSumConstraint.checked) {
+                const angleSum = +controls.angleSumValue.value;
+                const diff = angleSum - (next_a1 + next_a2 + next_a3);
+                // Distribute the difference to keep the sum constant
+                next_a1 += diff / 3;
+                next_a2 += diff / 3;
+                next_a3 += diff / 3;
+            }
+
+            controls.a1.value = next_a1;
+            controls.a2.value = next_a2;
+            controls.a3.value = next_a3;
 
             controls.a1_val.textContent = (+controls.a1.value).toFixed(0);
             controls.a2_val.textContent = (+controls.a2.value).toFixed(0);
             controls.a3_val.textContent = (+controls.a3.value).toFixed(0);
 
             drawArm();
-
             animationFrameId = requestAnimationFrame(animate);
         }
 
@@ -332,7 +300,7 @@
             if (+slider.value > max) slider.value = max;
             slider.dispatchEvent(new Event('input'));
         }
-        
+
         function updateView() {
             const l1 = +controls.l1.value, l2 = +controls.l2.value, l3 = +controls.l3.value;
             const maxReach = l1 + l2 + l3;
@@ -385,7 +353,7 @@
                 controls[`${id}_val`].textContent = controls[id].value;
             });
             ['1', '2', '3'].forEach(updateAngleSliderRange);
-            
+
             setupEventListeners();
             updateView();
             alert('各パラメータを設定し、「可動範囲を再計算」ボタンを押してください。');
