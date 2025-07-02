@@ -107,7 +107,7 @@
             <h4>Arm 1</h4>
             <div class="length-group">
                 <label for="arm1-length">Length (mm)</label>
-                <input type="number" id="arm1-length" min="0" max="500" value="250">
+                <input type="number" id="arm1-length" min="0" max="500" value="275">
             </div>
         </div>
 
@@ -135,7 +135,7 @@
             <h4>Arm 2</h4>
             <div class="length-group">
                 <label for="arm2-length">Length (mm)</label>
-                <input type="number" id="arm2-length" min="0" max="500" value="250">
+                <input type="number" id="arm2-length" min="0" max="500" value="275">
             </div>
         </div>
 
@@ -271,28 +271,29 @@
 
         // Base & Hierarchy
         const base = new THREE.Group();
+        base.position.y = -0.25; // Shift base so its top surface is at world Y=0
         const baseCylinder = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.5, 32), armMaterial);
         base.add(baseCylinder);
         scene.add(base);
 
         const joint1 = new THREE.Group();
-        joint1.position.y = 0.5;
-        joint1.add(createJoint(0.6));
+        joint1.position.y = 0.25; // Position on top of the base cylinder
+        joint1.add(createJoint(0.5));
         base.add(joint1);
 
-        const arm1 = createArm(250);
+        const arm1 = createArm(275);
         joint1.add(arm1);
 
         const joint2 = new THREE.Group();
-        joint2.position.y = 250 * scaleFactor;
+        joint2.position.y = 275 * scaleFactor;
         joint1.add(joint2);
         joint2.add(createJoint());
 
-        const arm2 = createArm(250);
+        const arm2 = createArm(275);
         joint2.add(arm2);
 
         const joint3 = new THREE.Group();
-        joint3.position.y = 250 * scaleFactor;
+        joint3.position.y = 275 * scaleFactor;
         joint2.add(joint3);
         joint3.add(createJoint());
         
@@ -309,7 +310,7 @@
 
         // --- World Axes ---
         const axesHelper = new THREE.AxesHelper(5);
-        axesHelper.position.copy(joint1.position);
+        axesHelper.position.set(0, 0, 0); // Set to world origin
         scene.add(axesHelper);
 
         // Axis Labels
@@ -385,9 +386,13 @@
                 const newLength = parseFloat(e.target.value) || 0;
                 const newLengthScaled = newLength * scaleFactor;
                 const newWidth = armWidth * 0.8;
+
                 arm3.geometry.dispose();
                 arm3.geometry = new THREE.BoxGeometry(newWidth, newLengthScaled, newWidth);
                 arm3.position.y = newLengthScaled / 2;
+
+                // Update the 3D label position to match the new arm length
+                eeLabel.position.y = newLengthScaled + 0.2; // 0.2 is the offset
             });
 
             // Workspace Buttons
@@ -528,7 +533,7 @@
 
             // Calculate end effector position in mm
             const arm3Len = parseFloat(ui.arm3.length.value) * scaleFactor;
-            const endEffectorPos = new THREE.Vector3(0, arm3Len, 0);
+            const endEffectorPos = new THREE.Vector3(0, arm3Len, 0); // Corrected: arm center is at 0,0,0, so end is at armLen/2
             arm3.localToWorld(endEffectorPos);
             ui.coords.ee.textContent = `X: ${(endEffectorPos.x / scaleFactor).toFixed(1)}, Y: ${(endEffectorPos.y / scaleFactor).toFixed(1)}, Z: ${(endEffectorPos.z / scaleFactor).toFixed(1)}`;
 
