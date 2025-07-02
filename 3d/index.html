@@ -59,6 +59,24 @@
         button:hover { background-color: #0055cc; }
         button:disabled { background-color: #555; cursor: not-allowed; }
         .coord-p { margin: 5px 0; font-size: 0.9em; }
+
+        /* For 3D Labels */
+        #label-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Allows clicking through to the canvas */
+        }
+        .label {
+            background-color: rgba(0, 0, 0, 0.6);
+            border: 1px solid #fff;
+            color: #fff;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -193,6 +211,7 @@
             <p class="coord-p">End Effector: <span id="ee-coords"></span></p>
         </div>
     </div>
+    <div id="label-container"></div>
 
     <script type="importmap">
         {
@@ -206,6 +225,7 @@
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
         // --- Scene Setup ---
         const scene = new THREE.Scene();
@@ -215,6 +235,14 @@
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
+
+        // CSS2DRenderer for 3D labels
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        document.getElementById('label-container').appendChild(labelRenderer.domElement);
 
         // --- Lighting ---
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -271,10 +299,35 @@
         const arm3 = createArm(125, armWidth * 0.8);
         joint3.add(arm3);
 
+        // --- End Effector 3D Label ---
+        const eeLabelDiv = document.createElement('div');
+        eeLabelDiv.className = 'label';
+        eeLabelDiv.textContent = 'X: 0.0, Y: 0.0, Z: 0.0';
+        const eeLabel = new CSS2DObject(eeLabelDiv);
+        eeLabel.position.set(0, (125 * scaleFactor) + 0.2, 0); // Position slightly above the end of arm3
+        arm3.add(eeLabel);
+
         // --- World Axes ---
         const axesHelper = new THREE.AxesHelper(5);
         axesHelper.position.copy(joint1.position);
         scene.add(axesHelper);
+
+        // Axis Labels
+        function createAxisLabel(text, position) {
+            const div = document.createElement('div');
+            div.className = 'label';
+            div.textContent = text;
+            const label = new CSS2DObject(div);
+            label.position.copy(position);
+            return label;
+        }
+
+        const axisLength = 5; // Same as axesHelper size
+        const offset = 0.5; // Offset to place label slightly beyond the axis end
+
+        axesHelper.add(createAxisLabel('X', new THREE.Vector3(axisLength + offset, 0, 0)));
+        axesHelper.add(createAxisLabel('Y', new THREE.Vector3(0, axisLength + offset, 0)));
+        axesHelper.add(createAxisLabel('Z', new THREE.Vector3(0, 0, axisLength + offset)));
 
         // --- Workspace Visualization ---
         let workspacePoints = null;
@@ -479,7 +532,13 @@
             arm3.localToWorld(endEffectorPos);
             ui.coords.ee.textContent = `X: ${(endEffectorPos.x / scaleFactor).toFixed(1)}, Y: ${(endEffectorPos.y / scaleFactor).toFixed(1)}, Z: ${(endEffectorPos.z / scaleFactor).toFixed(1)}`;
 
+            // Update 3D label
+            eeLabelDiv.textContent = `X: ${(endEffectorPos.x / scaleFactor).toFixed(1)}
+Y: ${(endEffectorPos.y / scaleFactor).toFixed(1)}
+Z: ${(endEffectorPos.z / scaleFactor).toFixed(1)}`;
+
             renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
         }
 
         function runAnimation(deltaTime) {
