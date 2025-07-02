@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced 3D Robot Arm Viewer</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        canvas { display: block; }
+        #ui-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 15px;
+            background: rgba(30, 30, 30, 0.8);
+            color: white;
+            border-radius: 8px;
+            max-height: 95vh;
+            overflow-y: auto;
+            width: 320px;
+        }
+        .joint-control-group, .arm-control-group, .workspace-controls, .coordinates-container {
+            margin-bottom: 15px;
+            border-bottom: 1px solid #555;
+            padding-bottom: 15px;
+        }
+        .range-group, .length-group {
+            margin-bottom: 10px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+        input[type="range"] { width: 100%; }
+        .range-inputs {
+            display: flex;
+            justify-content: space-between;
+        }
+        .range-inputs input[type="number"] { 
+            width: 60px; 
+            background-color: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 3px;
+            padding: 3px;
+        }
+        button {
+            padding: 8px 12px;
+            background-color: #0077ff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 5px;
+        }
+        button:hover { background-color: #0055cc; }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+        .coord-p { margin: 5px 0; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <div id="ui-container">
+        <!-- Joint 1 Controls -->
+        <div class="joint-control-group">
+            <h4>Joint 1</h4>
+            <div class="range-group">
+                <label>Y-axis Range (°)</label>
+                <div class="range-inputs">
+                    <input type="number" id="j1-y-min" value="-180"> 
+                    <input type="number" id="j1-y-max" value="180">
+                </div>
+                <input type="range" id="j1-y-slider" min="-180" max="180" value="0" step="1">
+            </div>
+            <div class="range-group">
+                <label>Z-axis Range (°)</label>
+                <div class="range-inputs">
+                    <input type="number" id="j1-z-min" value="-90"> 
+                    <input type="number" id="j1-z-max" value="90">
+                </div>
+                <input type="range" id="j1-z-slider" min="-90" max="90" value="0" step="1">
+            </div>
+        </div>
+
+        <!-- Arm 1 Controls -->
+        <div class="arm-control-group">
+            <h4>Arm 1</h4>
+            <div class="length-group">
+                <label for="arm1-length">Length (mm)</label>
+                <input type="number" id="arm1-length" min="0" max="500" value="250">
+            </div>
+        </div>
+
+        <!-- Joint 2, Arm 2, Joint 3, Arm 3... (similar structure) -->
+        <div class="joint-control-group">
+            <h4>Joint 2</h4>
+            <div class="range-group">
+                <label>Y-axis Range (°)</label>
+                <div class="range-inputs">
+                    <input type="number" id="j2-y-min" value="-180"> 
+                    <input type="number" id="j2-y-max" value="180">
+                </div>
+                <input type="range" id="j2-y-slider" min="-180" max="180" value="0" step="1">
+            </div>
+            <div class="range-group">
+                <label>Z-axis Range (°)</label>
+                <div class="range-inputs">
+                    <input type="number" id="j2-z-min" value="-90"> 
+                    <input type="number" id="j2-z-max" value="90">
+                </div>
+                <input type="range" id="j2-z-slider" min="-90" max="90" value="0" step="1">
+            </div>
+        </div>
+        <div class="arm-control-group">
+            <h4>Arm 2</h4>
+            <div class="length-group">
+                <label for="arm2-length">Length (mm)</label>
+                <input type="number" id="arm2-length" min="0" max="500" value="250">
+            </div>
+        </div>
+
+        <div class="joint-control-group">
+            <h4>Joint 3</h4>
+            <div class="range-group">
+                <label>Y-axis Range (°)</label>
+                <div class="range-inputs">
+                    <input type="number" id="j3-y-min" value="-180"> 
+                    <input type="number" id="j3-y-max" value="180">
+                </div>
+                <input type="range" id="j3-y-slider" min="-180" max="180" value="0" step="1">
+            </div>
+            <div class="range-group">
+                <label>Z-axis Range (°)</label>
+                <div class="range-inputs">
+                    <input type="number" id="j3-z-min" value="-90"> 
+                    <input type="number" id="j3-z-max" value="90">
+                </div>
+                <input type="range" id="j3-z-slider" min="-90" max="90" value="0" step="1">
+            </div>
+        </div>
+        <div class="arm-control-group">
+            <h4>Arm 3</h4>
+            <div class="length-group">
+                <label for="arm3-length">Length (mm)</label>
+                <input type="number" id="arm3-length" min="0" max="500" value="125">
+            </div>
+        </div>
+
+        <!-- Workspace Controls -->
+        <div class="workspace-controls">
+            <h4>Workspace Visualization</h4>
+            <div style="margin-bottom: 10px;">
+                <input type="checkbox" id="enable-constraint" style="vertical-align: middle;">
+                <label for="enable-constraint" style="display: inline; font-weight: normal;">Enable Orientation Constraint</label>
+            </div>
+            <div id="constraint-inputs" style="display: none; margin-bottom: 10px;">
+                <label>Target Vector (End Effector Direction)</label>
+                <div style="display: flex; justify-content: space-around;">
+                    X: <input type="number" id="vec-x" value="0" step="0.1" style="width: 50px;">
+                    Y: <input type="number" id="vec-y" value="-1" step="0.1" style="width: 50px;">
+                    Z: <input type="number" id="vec-z" value="0" step="0.1" style="width: 50px;">
+                </div>
+            </div>
+            <div class="range-group" style="margin-bottom: 10px;">
+                <label for="workspace-density">Point Density</label>
+                <input type="range" id="workspace-density" min="1000" max="20000" value="5000" step="100">
+            </div>
+            <button id="calculate-workspace">Calculate Workspace</button>
+            <button id="clear-workspace" style="background-color: #ff4444;">Clear Workspace</button>
+        </div>
+
+        <!-- Animation Controls -->
+        <div class="animation-controls" style="margin-bottom: 15px; border-bottom: 1px solid #555; padding-bottom: 15px;">
+            <h4>Animation</h4>
+            <div style="margin-bottom: 10px;">
+                <input type="checkbox" id="enable-animation" style="vertical-align: middle;">
+                <label for="enable-animation" style="display: inline; font-weight: normal;">Enable Animation</label>
+            </div>
+            <div>
+                <label for="animation-speed">Speed</label>
+                <input type="range" id="animation-speed" min="1" max="100" value="20">
+            </div>
+        </div>
+
+        <!-- Coordinates -->
+        <div class="coordinates-container">
+            <h4>Coordinates (mm)</h4>
+            <p class="coord-p">Joint 1: <span id="j1-coords"></span></p>
+            <p class="coord-p">Joint 2: <span id="j2-coords"></span></p>
+            <p class="coord-p">Joint 3: <span id="j3-coords"></span></p>
+            <p class="coord-p">End Effector: <span id="ee-coords"></span></p>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(8, 8, 8);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(5, 10, 7.5);
+        scene.add(directionalLight);
+
+        // --- Controls ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // --- Robot Arm Model ---
+        const armMaterial = new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.6 });
+        const jointMaterial = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.4 });
+        const armWidth = 0.4;
+        const scaleFactor = 0.01; // 1mm = 0.01 scene units
+
+        function createJoint(size = 0.5) { return new THREE.Mesh(new THREE.SphereGeometry(size), jointMaterial); }
+        function createArm(length = 250, width = armWidth) {
+            const scaledLength = length * scaleFactor;
+            const arm = new THREE.Mesh(new THREE.BoxGeometry(width, scaledLength, width), armMaterial);
+            arm.position.y = scaledLength / 2;
+            return arm;
+        }
+
+        // Base & Hierarchy
+        const base = new THREE.Group();
+        const baseCylinder = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.5, 32), armMaterial);
+        base.add(baseCylinder);
+        scene.add(base);
+
+        const joint1 = new THREE.Group();
+        joint1.position.y = 0.5;
+        joint1.add(createJoint(0.6));
+        base.add(joint1);
+
+        const arm1 = createArm(250);
+        joint1.add(arm1);
+
+        const joint2 = new THREE.Group();
+        joint2.position.y = 250 * scaleFactor;
+        joint1.add(joint2);
+        joint2.add(createJoint());
+
+        const arm2 = createArm(250);
+        joint2.add(arm2);
+
+        const joint3 = new THREE.Group();
+        joint3.position.y = 250 * scaleFactor;
+        joint2.add(joint3);
+        joint3.add(createJoint());
+        
+        const arm3 = createArm(125, armWidth * 0.8);
+        joint3.add(arm3);
+
+        // --- World Axes ---
+        const axesHelper = new THREE.AxesHelper(5);
+        axesHelper.position.copy(joint1.position);
+        scene.add(axesHelper);
+
+        // --- Workspace Visualization ---
+        let workspacePoints = null;
+
+        // --- UI Logic ---
+        const ui = {
+            j1: { y: { slider: document.getElementById('j1-y-slider'), min: document.getElementById('j1-y-min'), max: document.getElementById('j1-y-max') }, z: { slider: document.getElementById('j1-z-slider'), min: document.getElementById('j1-z-min'), max: document.getElementById('j1-z-max') } },
+            j2: { y: { slider: document.getElementById('j2-y-slider'), min: document.getElementById('j2-y-min'), max: document.getElementById('j2-y-max') }, z: { slider: document.getElementById('j2-z-slider'), min: document.getElementById('j2-z-min'), max: document.getElementById('j2-z-max') } },
+            j3: { y: { slider: document.getElementById('j3-y-slider'), min: document.getElementById('j3-y-min'), max: document.getElementById('j3-y-max') }, z: { slider: document.getElementById('j3-z-slider'), min: document.getElementById('j3-z-min'), max: document.getElementById('j3-z-max') } },
+            arm1: { length: document.getElementById('arm1-length') },
+            arm2: { length: document.getElementById('arm2-length') },
+            arm3: { length: document.getElementById('arm3-length') },
+            coords: { j1: document.getElementById('j1-coords'), j2: document.getElementById('j2-coords'), j3: document.getElementById('j3-coords'), ee: document.getElementById('ee-coords') },
+            buttons: { calc: document.getElementById('calculate-workspace'), clear: document.getElementById('clear-workspace') },
+            animation: { enable: document.getElementById('enable-animation'), speed: document.getElementById('animation-speed') }
+        };
+
+        function updateSlider(slider, min, max) {
+            slider.min = min; slider.max = max;
+            slider.value = Math.max(min, Math.min(max, slider.value));
+        }
+
+        function setupEventListeners() {
+            // Joint Angle Sliders
+            ui.j1.y.slider.addEventListener('input', (e) => { base.rotation.y = THREE.MathUtils.degToRad(e.target.value); });
+            ui.j1.z.slider.addEventListener('input', (e) => { joint1.rotation.z = THREE.MathUtils.degToRad(e.target.value); });
+            ui.j2.y.slider.addEventListener('input', (e) => { joint2.rotation.y = THREE.MathUtils.degToRad(e.target.value); });
+            ui.j2.z.slider.addEventListener('input', (e) => { joint2.rotation.z = THREE.MathUtils.degToRad(e.target.value); });
+            ui.j3.y.slider.addEventListener('input', (e) => { joint3.rotation.y = THREE.MathUtils.degToRad(e.target.value); });
+            ui.j3.z.slider.addEventListener('input', (e) => { joint3.rotation.z = THREE.MathUtils.degToRad(e.target.value); });
+
+            // Joint Angle Range Inputs
+            Object.values(ui.j1).forEach(axis => { axis.min.addEventListener('change', () => updateSlider(axis.slider, axis.min.value, axis.max.value)); axis.max.addEventListener('change', () => updateSlider(axis.slider, axis.min.value, axis.max.value)); });
+            Object.values(ui.j2).forEach(axis => { axis.min.addEventListener('change', () => updateSlider(axis.slider, axis.min.value, axis.max.value)); axis.max.addEventListener('change', () => updateSlider(axis.slider, axis.min.value, axis.max.value)); });
+            Object.values(ui.j3).forEach(axis => { axis.min.addEventListener('change', () => updateSlider(axis.slider, axis.min.value, axis.max.value)); axis.max.addEventListener('change', () => updateSlider(axis.slider, axis.min.value, axis.max.value)); });
+
+            // Arm Length Inputs
+            ui.arm1.length.addEventListener('input', (e) => {
+                const newLength = parseFloat(e.target.value) || 0;
+                const newLengthScaled = newLength * scaleFactor;
+                arm1.geometry.dispose();
+                arm1.geometry = new THREE.BoxGeometry(armWidth, newLengthScaled, armWidth);
+                arm1.position.y = newLengthScaled / 2;
+                joint2.position.y = newLengthScaled;
+            });
+            ui.arm2.length.addEventListener('input', (e) => {
+                const newLength = parseFloat(e.target.value) || 0;
+                const newLengthScaled = newLength * scaleFactor;
+                arm2.geometry.dispose();
+                arm2.geometry = new THREE.BoxGeometry(armWidth, newLengthScaled, armWidth);
+                arm2.position.y = newLengthScaled / 2;
+                joint3.position.y = newLengthScaled;
+            });
+            ui.arm3.length.addEventListener('input', (e) => {
+                const newLength = parseFloat(e.target.value) || 0;
+                const newLengthScaled = newLength * scaleFactor;
+                const newWidth = armWidth * 0.8;
+                arm3.geometry.dispose();
+                arm3.geometry = new THREE.BoxGeometry(newWidth, newLengthScaled, newWidth);
+                arm3.position.y = newLengthScaled / 2;
+            });
+
+            // Workspace Buttons
+            ui.buttons.calc.addEventListener('click', calculateWorkspace);
+            ui.buttons.clear.addEventListener('click', clearWorkspace);
+            document.getElementById('enable-constraint').addEventListener('change', (e) => {
+                document.getElementById('constraint-inputs').style.display = e.target.checked ? 'block' : 'none';
+            });
+
+            // Animation Controls
+            ui.animation.enable.addEventListener('change', (e) => {
+                animationState.enabled = e.target.checked;
+                animationState.needsNewTarget = true; // Get a new target when animation is enabled
+            });
+        }
+
+        function calculateWorkspace() {
+            clearWorkspace();
+            ui.buttons.calc.disabled = true;
+            ui.buttons.calc.textContent = 'Calculating...';
+
+            setTimeout(() => {
+                const points = [];
+                const tempWorldPos = new THREE.Vector3();
+                const density = parseInt(document.getElementById('workspace-density').value);
+                const max_samples = density * 10; // To prevent infinite loops in constrained mode
+
+                const useConstraint = document.getElementById('enable-constraint').checked;
+                const targetDir = new THREE.Vector3(
+                    parseFloat(document.getElementById('vec-x').value),
+                    parseFloat(document.getElementById('vec-y').value),
+                    parseFloat(document.getElementById('vec-z').value)
+                ).normalize();
+                const angleThreshold = Math.cos(THREE.MathUtils.degToRad(15)); // Tolerance in radians (cos)
+
+                const j1y_min = THREE.MathUtils.degToRad(ui.j1.y.min.value);
+                const j1y_max = THREE.MathUtils.degToRad(ui.j1.y.max.value);
+                const j1z_min = THREE.MathUtils.degToRad(ui.j1.z.min.value);
+                const j1z_max = THREE.MathUtils.degToRad(ui.j1.z.max.value);
+                const j2y_min = THREE.MathUtils.degToRad(ui.j2.y.min.value);
+                const j2y_max = THREE.MathUtils.degToRad(ui.j2.y.max.value);
+                const j2z_min = THREE.MathUtils.degToRad(ui.j2.z.min.value);
+                const j2z_max = THREE.MathUtils.degToRad(ui.j2.z.max.value);
+                const j3y_min = THREE.MathUtils.degToRad(ui.j3.y.min.value);
+                const j3y_max = THREE.MathUtils.degToRad(ui.j3.y.max.value);
+                const j3z_min = THREE.MathUtils.degToRad(ui.j3.z.min.value);
+                const j3z_max = THREE.MathUtils.degToRad(ui.j3.z.max.value);
+
+                const arm3Len = parseFloat(ui.arm3.length.value) * scaleFactor;
+
+                for (let i = 0; i < max_samples && points.length < density * 3; i++) {
+                    // Temporarily set arm to a random valid configuration
+                    base.rotation.y = THREE.MathUtils.randFloat(j1y_min, j1y_max);
+                    joint1.rotation.z = THREE.MathUtils.randFloat(j1z_min, j1z_max);
+                    joint2.rotation.y = THREE.MathUtils.randFloat(j2y_min, j2y_max);
+                    joint2.rotation.z = THREE.MathUtils.randFloat(j2z_min, j2z_max);
+                    joint3.rotation.y = THREE.MathUtils.randFloat(j3y_min, j3y_max);
+                    joint3.rotation.z = THREE.MathUtils.randFloat(j3z_min, j3z_max);
+                    
+                    scene.updateMatrixWorld(true);
+
+                    if (useConstraint) {
+                        const worldQuaternion = new THREE.Quaternion();
+                        arm3.getWorldQuaternion(worldQuaternion);
+                        const currentDir = new THREE.Vector3(0, 1, 0).applyQuaternion(worldQuaternion);
+
+                        // Check if the angle between current and target direction is within threshold
+                        if (currentDir.dot(targetDir) > angleThreshold) {
+                            const endEffector = new THREE.Vector3(0, arm3Len, 0);
+                            arm3.localToWorld(endEffector);
+                            points.push(endEffector.x, endEffector.y, endEffector.z);
+                        }
+                    } else {
+                        const endEffector = new THREE.Vector3(0, arm3Len, 0);
+                        arm3.localToWorld(endEffector);
+                        points.push(endEffector.x, endEffector.y, endEffector.z);
+                    }
+                }
+
+                // Restore original rotation
+                base.rotation.y = THREE.MathUtils.degToRad(ui.j1.y.slider.value);
+                joint1.rotation.z = THREE.MathUtils.degToRad(ui.j1.z.slider.value);
+                joint2.rotation.y = THREE.MathUtils.degToRad(ui.j2.y.slider.value);
+                joint2.rotation.z = THREE.MathUtils.degToRad(ui.j2.z.slider.value);
+                joint3.rotation.y = THREE.MathUtils.degToRad(ui.j3.y.slider.value);
+                joint3.rotation.z = THREE.MathUtils.degToRad(ui.j3.z.slider.value);
+
+                if (points.length > 0) {
+                    const geometry = new THREE.BufferGeometry();
+                    geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+                    const material = new THREE.PointsMaterial({ color: 0x00ff00, size: 0.05 });
+                    workspacePoints = new THREE.Points(geometry, material);
+                    scene.add(workspacePoints);
+                }
+
+                ui.buttons.calc.disabled = false;
+                ui.buttons.calc.textContent = 'Calculate Workspace';
+            }, 10); // setTimeout to allow UI to update
+        }
+
+        function clearWorkspace() {
+            if (workspacePoints) {
+                scene.remove(workspacePoints);
+                workspacePoints.geometry.dispose();
+                workspacePoints.material.dispose();
+                workspacePoints = null;
+            }
+        }
+
+        // --- Animation State ---
+        let animationState = {
+            enabled: false,
+            targetAngles: { j1y: 0, j1z: 0, j2y: 0, j2z: 0, j3y: 0, j3z: 0 },
+            needsNewTarget: true
+        };
+
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+        const worldPosition = new THREE.Vector3();
+        function animate() {
+            requestAnimationFrame(animate);
+            const deltaTime = clock.getDelta();
+            controls.update();
+
+            if (animationState.enabled) {
+                runAnimation(deltaTime);
+            }
+
+            // Update coordinate displays
+            function updateCoord(element, object) {
+                object.getWorldPosition(worldPosition);
+                element.textContent = `X: ${(worldPosition.x / scaleFactor).toFixed(1)}, Y: ${(worldPosition.y / scaleFactor).toFixed(1)}, Z: ${(worldPosition.z / scaleFactor).toFixed(1)}`;
+            }
+
+            updateCoord(ui.coords.j1, joint1);
+            updateCoord(ui.coords.j2, joint2);
+            updateCoord(ui.coords.j3, joint3);
+
+            // Calculate end effector position in mm
+            const arm3Len = parseFloat(ui.arm3.length.value) * scaleFactor;
+            const endEffectorPos = new THREE.Vector3(0, arm3Len, 0);
+            arm3.localToWorld(endEffectorPos);
+            ui.coords.ee.textContent = `X: ${(endEffectorPos.x / scaleFactor).toFixed(1)}, Y: ${(endEffectorPos.y / scaleFactor).toFixed(1)}, Z: ${(endEffectorPos.z / scaleFactor).toFixed(1)}`;
+
+            renderer.render(scene, camera);
+        }
+
+        function runAnimation(deltaTime) {
+            if (animationState.needsNewTarget) {
+                findNewAnimationTarget();
+                animationState.needsNewTarget = false;
+            }
+
+            const speed = ui.animation.speed.value / 1000;
+            const lerpFactor = Math.min(speed * deltaTime * 50, 1); // Adjust multiplier for desired speed feel
+
+            // Interpolate current angles to target angles
+            base.rotation.y = THREE.MathUtils.lerp(base.rotation.y, animationState.targetAngles.j1y, lerpFactor);
+            joint1.rotation.z = THREE.MathUtils.lerp(joint1.rotation.z, animationState.targetAngles.j1z, lerpFactor);
+            joint2.rotation.y = THREE.MathUtils.lerp(joint2.rotation.y, animationState.targetAngles.j2y, lerpFactor);
+            joint2.rotation.z = THREE.MathUtils.lerp(joint2.rotation.z, animationState.targetAngles.j2z, lerpFactor);
+            joint3.rotation.y = THREE.MathUtils.lerp(joint3.rotation.y, animationState.targetAngles.j3y, lerpFactor);
+            joint3.rotation.z = THREE.MathUtils.lerp(joint3.rotation.z, animationState.targetAngles.j3z, lerpFactor);
+
+            // Update sliders to reflect animation
+            ui.j1.y.slider.value = THREE.MathUtils.radToDeg(base.rotation.y);
+            ui.j1.z.slider.value = THREE.MathUtils.radToDeg(joint1.rotation.z);
+            ui.j2.y.slider.value = THREE.MathUtils.radToDeg(joint2.rotation.y);
+            ui.j2.z.slider.value = THREE.MathUtils.radToDeg(joint2.rotation.z);
+            ui.j3.y.slider.value = THREE.MathUtils.radToDeg(joint3.rotation.y);
+            ui.j3.z.slider.value = THREE.MathUtils.radToDeg(joint3.rotation.z);
+
+            // Check if target is reached
+            const dist = Math.abs(base.rotation.y - animationState.targetAngles.j1y) + Math.abs(joint1.rotation.z - animationState.targetAngles.j1z);
+            if (dist < 0.05) { // Threshold to consider target reached
+                animationState.needsNewTarget = true;
+            }
+        }
+
+        function findNewAnimationTarget() {
+            const useConstraint = document.getElementById('enable-constraint').checked;
+            const j1y_min = THREE.MathUtils.degToRad(ui.j1.y.min.value);
+            const j1y_max = THREE.MathUtils.degToRad(ui.j1.y.max.value);
+            const j1z_min = THREE.MathUtils.degToRad(ui.j1.z.min.value);
+            const j1z_max = THREE.MathUtils.degToRad(ui.j1.z.max.value);
+            const j2y_min = THREE.MathUtils.degToRad(ui.j2.y.min.value);
+            const j2y_max = THREE.MathUtils.degToRad(ui.j2.y.max.value);
+            const j2z_min = THREE.MathUtils.degToRad(ui.j2.z.min.value);
+            const j2z_max = THREE.MathUtils.degToRad(ui.j2.z.max.value);
+            const j3y_min = THREE.MathUtils.degToRad(ui.j3.y.min.value);
+            const j3y_max = THREE.MathUtils.degToRad(ui.j3.y.max.value);
+            const j3z_min = THREE.MathUtils.degToRad(ui.j3.z.min.value);
+            const j3z_max = THREE.MathUtils.degToRad(ui.j3.z.max.value);
+
+            if (!useConstraint) {
+                animationState.targetAngles = {
+                    j1y: THREE.MathUtils.randFloat(j1y_min, j1y_max),
+                    j1z: THREE.MathUtils.randFloat(j1z_min, j1z_max),
+                    j2y: THREE.MathUtils.randFloat(j2y_min, j2y_max),
+                    j2z: THREE.MathUtils.randFloat(j2z_min, j2z_max),
+                    j3y: THREE.MathUtils.randFloat(j3y_min, j3y_max),
+                    j3z: THREE.MathUtils.randFloat(j3z_min, j3z_max)
+                };
+            } else {
+                const targetDir = new THREE.Vector3(
+                    parseFloat(document.getElementById('vec-x').value),
+                    parseFloat(document.getElementById('vec-y').value),
+                    parseFloat(document.getElementById('vec-z').value)
+                ).normalize();
+                const angleThreshold = Math.cos(THREE.MathUtils.degToRad(15));
+
+                // Search for a valid pose
+                for (let i = 0; i < 500; i++) { // Limit search to 500 attempts
+                    const tempAngles = {
+                        j1y: THREE.MathUtils.randFloat(j1y_min, j1y_max),
+                        j1z: THREE.MathUtils.randFloat(j1z_min, j1z_max),
+                        j2y: THREE.MathUtils.randFloat(j2y_min, j2y_max),
+                        j2z: THREE.MathUtils.randFloat(j2z_min, j2z_max),
+                        j3y: THREE.MathUtils.randFloat(j3y_min, j3y_max),
+                        j3z: THREE.MathUtils.randFloat(j3z_min, j3z_max)
+                    };
+
+                    // Temporarily apply angles to check direction
+                    const originalRotations = { j1y: base.rotation.y, j1z: joint1.rotation.z, j2y: joint2.rotation.y, j2z: joint2.rotation.z, j3y: joint3.rotation.y, j3z: joint3.rotation.z };
+                    base.rotation.y = tempAngles.j1y;
+                    joint1.rotation.z = tempAngles.j1z;
+                    joint2.rotation.y = tempAngles.j2y;
+                    joint2.rotation.z = tempAngles.j2z;
+                    joint3.rotation.y = tempAngles.j3y;
+                    joint3.rotation.z = tempAngles.j3z;
+                    scene.updateMatrixWorld(true);
+
+                    const worldQuaternion = new THREE.Quaternion();
+                    arm3.getWorldQuaternion(worldQuaternion);
+                    const currentDir = new THREE.Vector3(0, 1, 0).applyQuaternion(worldQuaternion);
+
+                    // Restore original rotations
+                    base.rotation.y = originalRotations.j1y; joint1.rotation.z = originalRotations.j1z; joint2.rotation.y = originalRotations.j2y; joint2.rotation.z = originalRotations.j2z; joint3.rotation.y = originalRotations.j3y; joint3.rotation.z = originalRotations.j3z;
+
+                    if (currentDir.dot(targetDir) > angleThreshold) {
+                        animationState.targetAngles = tempAngles;
+                        return; // Found a valid target
+                    }
+                }
+                // If no valid pose is found after attempts, just use a random one (or stay put)
+            }
+        }
+
+        // --- Handle Window Resize ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        setupEventListeners();
+        animate();
+    </script>
+</body>
+</html>
